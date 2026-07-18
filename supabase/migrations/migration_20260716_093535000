@@ -1,0 +1,18 @@
+
+-- Prevent furniture categories from ever being re-inserted into this digital marketplace
+create or replace function public.block_furniture_categories()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.slug in ('sofas-seating', 'beds-bedroom', 'dining-kitchen', 'storage-wardrobes', 'office-study', 'decor-lighting') then
+    raise exception 'Furniture categories are not allowed in this digital marketplace';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists prevent_furniture_categories on public.categories;
+create trigger prevent_furniture_categories
+before insert or update on public.categories
+for each row execute function public.block_furniture_categories();

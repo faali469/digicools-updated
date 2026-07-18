@@ -1,0 +1,229 @@
+
+-- =========================================
+-- DigiCools MVP schema
+-- =========================================
+
+-- Roles enum
+create type public.app_role as enum ('admin', 'user');
+
+-- Profiles table (extends auth.users)
+create table public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  full_name text,
+  avatar_url text,
+  role public.app_role not null default 'user',
+  download_count_used integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+alter table public.profiles enable row level security;
+
+create policy "Profiles are viewable by owner" on public.profiles
+  for select using (auth.uid() = id);
+
+create policy "Profiles are updatable by owner" on public.profiles
+  for update using (auth.uid() = id);
+
+create policy "Profiles are insertable by owner" on public.profiles
+  for insert with check (auth.uid() = id);
+
+-- Security definer function to check admin role (avoids recursive RLS)
+create or replace function public.has_role(_user_id uuid, _role public.app_role)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.profiles
+    where id = _user_id and role = _role
+  )
+$$;
+
+create policy "Admins can view all profiles" on public.profiles
+  for select using (public.has_role(auth.uid(), 'admin'));
+
+create policy "Admins can update all profiles" on public.profiles
+  for update using (public.has_role(auth.uid(), 'admin'));
+
+-- Trigger to auto-create profile on signup
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, full_name)
+  values (new.id, new.raw_user_meta_data ->> 'full_name');
+  return new;
+end;
+$$;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- Categories
+create table public.categories (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  slug text not null unique,
+  icon text,
+  description text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.categories enable row level security;
+
+create policy "Categories are viewable by everyone" on public.categories
+  for select using (true);
+
+create policy "Admins can manage categories" on public.categories
+  for all using (public.has_role(auth.uid(), 'admin'))
+  with check (public.has_role(auth.uid(), 'admin'));
+
+-- Products
+create table public.products (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  slug text not null unique,
+  description text,
+  category_id uuid references public.categories(id) on delete set null,
+  thumbnail_url text,
+  preview_images text[] not null default '{}',
+  file_path text,
+  tags text[] not null default '{}',
+  is_featured boolean not null default false,
+  downloads_count integer not null default 0,
+  rating numeric(2,1) not null default 0,
+  status text not null default 'published',
+  created_at timestamptz not null default now()
+);
+
+alter table public.products enable row level security;
+
+create policy "Published products are viewable by everyone" on public.products
+  for select using (status = 'published' or public.has_role(auth.uid(), 'admin'));
+
+create policy "Admins can manage products" on public.products
+  for all using (public.has_role(auth.uid(), 'admin'))
+  with check (public.has_role(auth.uid(), 'admin'));
+
+-- Plans
+create table public.plans (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  price_monthly numeric(10,2) not null default 0,
+  price_yearly numeric(10,2) not null default 0,
+  features jsonb not null default '[]',
+  download_limit integer,
+  is_popular boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+alter table public.plans enable row level security;
+
+create policy "Plans are viewable by everyone" on public.plans
+  for select using (true);
+
+create policy "Admins can manage plans" on public.plans
+  for all using (public.has_role(auth.uid(), 'admin'))
+  with check (public.has_role(auth.uid(), 'admin'));
+
+-- Subscriptions
+create table public.subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  plan_id uuid not null references public.plans(id),
+  status text not null default 'active',
+  provider text not null,
+  provider_subscription_id text,
+  billing_cycle text not null default 'monthly',
+  current_period_end timestamptz,
+  created_at timestamptz not null default now()
+);
+
+alter table public.subscriptions enable row level security;
+
+create policy "Users view own subscriptions" on public.subscriptions
+  for select using (auth.uid() = user_id);
+
+create policy "Admins view all subscriptions" on public.subscriptions
+  for select using (public.has_role(auth.uid(), 'admin'));
+
+-- Orders
+create table public.orders (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  plan_id uuid references public.plans(id),
+  amount numeric(10,2) not null,
+  currency text not null default 'INR',
+  provider text not null,
+  provider_payment_id text,
+  status text not null default 'pending',
+  created_at timestamptz not null default now()
+);
+
+alter table public.orders enable row level security;
+
+create policy "Users view own orders" on public.orders
+  for select using (auth.uid() = user_id);
+
+create policy "Admins view all orders" on public.orders
+  for select using (public.has_role(auth.uid(), 'admin'));
+
+-- Downloads
+create table public.downloads (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  product_id uuid not null references public.products(id) on delete cascade,
+  downloaded_at timestamptz not null default now()
+);
+
+alter table public.downloads enable row level security;
+
+create policy "Users view own downloads" on public.downloads
+  for select using (auth.uid() = user_id);
+
+create policy "Admins view all downloads" on public.downloads
+  for select using (public.has_role(auth.uid(), 'admin'));
+
+-- Wishlist
+create table public.wishlist (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  product_id uuid not null references public.products(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique(user_id, product_id)
+);
+
+alter table public.wishlist enable row level security;
+
+create policy "Users manage own wishlist" on public.wishlist
+  for all using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- Seed default plans
+insert into public.plans (name, price_monthly, price_yearly, features, download_limit, is_popular) values
+('Free', 0, 0, '["5 downloads per month", "Access to free products", "Community support"]', 5, false),
+('Standard', 499, 4999, '["Unlimited downloads", "Access to all products", "Priority email support"]', null, false),
+('Pro', 999, 9999, '["Everything in Standard", "AI Tools access", "Priority support", "Exclusive products"]', null, true);
+
+-- Seed default categories
+insert into public.categories (name, slug, icon, description) values
+('AI Prompts', 'ai-prompts', 'Sparkles', 'Curated prompts for top AI tools'),
+('Canva Templates', 'canva-templates', 'Palette', 'Ready-to-edit Canva designs'),
+('Notion Templates', 'notion-templates', 'NotebookPen', 'Productivity systems for Notion'),
+('Excel Templates', 'excel-templates', 'Table', 'Spreadsheets for business and finance'),
+('Resume & CV', 'resume-cv', 'FileText', 'Professional resume templates'),
+('UI Kits', 'ui-kits', 'LayoutGrid', 'Design system kits for product teams'),
+('Icons & Fonts', 'icons-fonts', 'Type', 'Icon packs and premium fonts'),
+('Construction Templates', 'construction-templates', 'HardHat', 'Planning docs for construction pros'),
+('Trading Journals', 'trading-journals', 'LineChart', 'Trading and finance trackers'),
+('Marketing Templates', 'marketing-templates', 'Megaphone', 'Social and campaign templates');
+
+-- Enable realtime for admin dashboards (optional but useful)
+alter publication supabase_realtime add table public.orders;
+alter publication supabase_realtime add table public.products;

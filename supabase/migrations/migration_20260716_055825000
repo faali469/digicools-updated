@@ -1,0 +1,32 @@
+
+-- Create private storage bucket for product files, and public bucket for thumbnails/previews
+insert into storage.buckets (id, name, public)
+values ('product-files', 'product-files', false)
+on conflict (id) do nothing;
+
+insert into storage.buckets (id, name, public)
+values ('product-images', 'product-images', true)
+on conflict (id) do nothing;
+
+-- Admins can upload/manage product files
+create policy "Admins manage product files"
+on storage.objects for all
+using (bucket_id = 'product-files' and public.has_role(auth.uid(), 'admin'))
+with check (bucket_id = 'product-files' and public.has_role(auth.uid(), 'admin'));
+
+-- Public read for product images, admin write
+create policy "Public can view product images"
+on storage.objects for select
+using (bucket_id = 'product-images');
+
+create policy "Admins manage product images"
+on storage.objects for insert
+with check (bucket_id = 'product-images' and public.has_role(auth.uid(), 'admin'));
+
+create policy "Admins update product images"
+on storage.objects for update
+using (bucket_id = 'product-images' and public.has_role(auth.uid(), 'admin'));
+
+create policy "Admins delete product images"
+on storage.objects for delete
+using (bucket_id = 'product-images' and public.has_role(auth.uid(), 'admin'));

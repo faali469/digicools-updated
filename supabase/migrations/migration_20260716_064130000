@@ -1,0 +1,13 @@
+
+-- Add price to products
+alter table public.products add column price numeric(10,2) not null default 0;
+
+-- Allow orders to reference a single product purchase (in addition to plan subscriptions)
+alter table public.orders add column product_id uuid references public.products(id) on delete set null;
+
+alter table public.orders
+  add constraint orders_plan_or_product_check
+  check ((plan_id is not null)::int + (product_id is not null)::int = 1);
+
+-- Users need to read their own paid orders to know which products they already own
+-- (existing "Users view own orders" policy already covers this)

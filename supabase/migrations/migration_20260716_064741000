@@ -1,0 +1,3 @@
+update public.plans
+set features = '["Access to all free products", "Buy premium products individually", "Community support"]'::jsonb
+where name = 'Free';

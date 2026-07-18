@@ -1,0 +1,31 @@
+
+-- Remove all furniture products and categories (not part of DigiCools digital marketplace)
+delete from public.products
+where category_id in (
+  select id from public.categories
+  where slug in (
+    'sofas-seating', 'beds-bedroom', 'dining-kitchen',
+    'storage-wardrobes', 'office-study', 'decor-lighting'
+  )
+);
+
+delete from public.categories
+where slug in (
+  'sofas-seating', 'beds-bedroom', 'dining-kitchen',
+  'storage-wardrobes', 'office-study', 'decor-lighting'
+);
+
+-- Restore the original DigiCools digital product categories (re-insert if missing)
+insert into public.categories (name, slug, icon, description)
+values
+('AI Prompts', 'ai-prompts', 'Sparkles', 'Curated prompts for top AI tools'),
+('Canva Templates', 'canva-templates', 'Palette', 'Ready-to-edit Canva designs'),
+('Notion Templates', 'notion-templates', 'NotebookPen', 'Productivity systems for Notion'),
+('Excel Templates', 'excel-templates', 'Table', 'Spreadsheets for business and finance'),
+('Resume & CV', 'resume-cv', 'FileText', 'Professional resume templates'),
+('UI Kits', 'ui-kits', 'LayoutGrid', 'Design system kits for product teams'),
+('Icons & Fonts', 'icons-fonts', 'Type', 'Icon packs and premium fonts'),
+('Construction Templates', 'construction-templates', 'HardHat', 'Planning docs for construction pros'),
+('Trading Journals', 'trading-journals', 'LineChart', 'Trading and finance trackers'),
+('Marketing Templates', 'marketing-templates', 'Megaphone', 'Social and campaign templates')
+on conflict (slug) do nothing;
